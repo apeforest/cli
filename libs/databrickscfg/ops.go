@@ -23,6 +23,7 @@ const (
 	databricksSettingsSection = "__settings__"
 	defaultProfileKey         = "default_profile"
 	authStorageKey            = "auth_storage"
+	dockerProfileKeyPrefix    = "docker_profile."
 )
 
 // GetConfiguredDefaultProfile returns the explicitly configured default profile
@@ -268,6 +269,34 @@ func SetDefaultProfile(ctx context.Context, profileName, configFilePath string) 
 	section.Key(defaultProfileKey).SetValue(profileName)
 
 	return writeConfigFile(ctx, configFile)
+}
+
+// GetDockerProfile returns the profile recorded for the Docker registry host, or "" if none is recorded.
+func GetDockerProfile(ctx context.Context, registryHost, configFilePath string) (string, error) {
+	configFile, err := loadConfigFile(ctx, configFilePath)
+	if err != nil {
+		return "", err
+	}
+	if configFile == nil {
+		return "", nil
+	}
+	return configFile.Section(databricksSettingsSection).Key(dockerProfileKeyPrefix + registryHost).String(), nil
+}
+
+// SetDockerProfile records profileName for the Docker registry host and returns the profile recorded before, or "" if none was.
+func SetDockerProfile(ctx context.Context, registryHost, profileName, configFilePath string) (string, error) {
+	configFile, err := loadOrCreateConfigFile(ctx, configFilePath)
+	if err != nil {
+		return "", err
+	}
+
+	key := configFile.Section(databricksSettingsSection).Key(dockerProfileKeyPrefix + registryHost)
+	previous := key.String()
+	if previous == profileName {
+		return previous, nil
+	}
+	key.SetValue(profileName)
+	return previous, writeConfigFile(ctx, configFile)
 }
 
 // SetConfiguredAuthStorage writes the auth_storage key to the [__settings__]
@@ -539,6 +568,14 @@ func DeleteProfile(ctx context.Context, profileName, configFilePath string) erro
 		}
 	} else {
 		configFile.DeleteSection(profileName)
+	}
+
+	if settings, err := configFile.GetSection(databricksSettingsSection); err == nil {
+		for _, key := range settings.Keys() {
+			if strings.HasPrefix(key.Name(), dockerProfileKeyPrefix) && key.Value() == profileName {
+				settings.DeleteKey(key.Name())
+			}
+		}
 	}
 
 	return writeConfigFile(ctx, configFile)
